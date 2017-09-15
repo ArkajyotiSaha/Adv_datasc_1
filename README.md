@@ -9,3 +9,9 @@ My project will be with the data available in Zillow competition. In order to ge
   4. The next task is to decide upon the nature of relationship between the outcome and the covarates. The initial trial will be with linear regression. In case, the results are not upto the mark, higher order interaction terms will be included in the model. If inclusion of suffcient number of higher order terms fail to provide significant improvement, I will opt for machine learning algorithms (Random forest, Neural Net etc.) to model the relationship between the covariates and the outcome.
   5. The size of the dataset being in millions, instead of fullgp model a scalable Nearest Neighboour Gaussian Process will be used with a suitble choice of number of nearest neighbiurs (usually limited to 20) in order to take care of the spatial component.
   6. In order to get confidence interval of the estimates, both the Bayesian (MCMC) and the frequentist approach (Bootstrap) will be deployed.
+  
+  
+Due to the privacy policies of the Zillow data and ease of handling a large dataset, the original Rmarkdown is available in Kaggle, with the following link. 
+https://www.kaggle.com/arkajyotisaha/analysis-of-zillow-data
+
+The generated HTML file is also available in the Github Repository. 
