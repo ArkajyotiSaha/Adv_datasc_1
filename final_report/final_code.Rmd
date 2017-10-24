@@ -1,0 +1,153 @@
+---
+title: "Analysis of Zillow data"
+author: "Arkajyoti Saha"
+date: "24 October 2017"
+output: html_document
+---
+
+As we are only a month away from the final submission date for the first round of Zillow competition, I do feel that it is pretty hard to get excited about a priliminary level analysis at this point of time, that too in presence of a number of enriching kernels on the very same topic. This is nothing but a humble attempt of a beginner at data scince to get constructive feedbacks from the fellow kagglers. 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r, message = FALSE}
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(corrplot)
+```
+
+The primary task in the competition is to predict the log error in Zillow's estimation of property value ("Zestimate"). The data is subdivided into two parts, the first one being the information on the home features of the properties, the second one being the set of available responses. Detailed information on these datasets can be found in the competition website. First we read the data:
+```{r, message = FALSE, warning = FALSE, results='hide'}
+# Load data
+properties <- fread('properties_2017.csv')
+train_data <- fread('train_2017.csv')
+```
+
+Some of the feature names in the properties dataset donot clearly represent what they actually mean. For sake of clarity, we rename a few of them as follows:  
+```{r, warning = FALSE, message = FALSE}
+# Renaming of features with confusing names
+properties <- properties %>% rename(
+  patio_yard = yardbuildingsqft17,
+  storage_yard = yardbuildingsqft26, 
+  base_unfin_fin = finishedsquarefeet6,
+  liv_area_fin = finishedsquarefeet12,
+  liv_peri_fin = finishedsquarefeet13,
+  total_fin = finishedsquarefeet15,  
+  liv_fin_1st = finishedsquarefeet50
+)
+```
+
+In this EDA, we will primarily be interested in the set of points, for which the log error response are available, i.e. the parcelid's in the training dataset.
+```{r, warning = FALSE, message = FALSE}
+# Joining with respect to parcelids
+setkey(properties, parcelid)
+setkey(train_data, parcelid)
+
+merged_data <- properties[train_data]
+
+rm(properties, train_data)
+```
+
+In the provided dataset, for a number of variables, most of the data are missing, which becomes evident from the following figure:
+```{r fig.height=15, warning = FALSE, message = FALSE}
+# Analysis of missing data
+missing_values <- merged_data %>% summarise_all(funs(sum(is.na(.))/n() * 100))
+
+missing_values <- gather(missing_values, key="Variable", value="missing_percentage")
+
+missing_values %>% 
+  ggplot(aes(x=reorder(Variable,-missing_percentage),y = missing_percentage)) +
+  geom_bar(stat="identity",fill="blue")+ labs(x = '', y = "Percentage Missing") + labs(title = "Missingness pattern") +
+  coord_flip()
+```
+
+One of the most common ways to handle missing data is through data imputation. For a variable with it's most of the data missing, data imputation may not only fail to provide additional information, but also worsen the performance of the estimation. If we look closely at the figure above, clearly there are a number of variables with more than 50% of missing data. For here on we proceed with the features having less than 50% of missing data, to further explore the correlation structure between the features. 
+
+```{r fig.height=10, fig.width = 10,  warning = FALSE, message = FALSE}
+#Variable Selection
+good_variables <- filter(missing_values, missing_percentage< 40)
+
+avl_variable <- good_variables$Variable
+num_avl_variable <- avl_variable[sapply(avl_variable, function(x) is.numeric(merged_data[[x]]))]
+cor_plot <- merged_data %>% select(one_of(c(num_avl_variable,"logerror")))
+correlation_structure <- cor(cor_plot, use="complete.obs")
+corrplot(correlation_structure,type="lower")
+```
+
+In the figure above we observe that the log error is not correlated with any of the home features. Moreover, there are few groups of highly correlated features. In order to explore the interesting pairs of highly correlated features, we find out the variable pairs having correlation with absolute value more than 0.75. 
+```{r,  warning = FALSE, message = FALSE}
+correlation_structure_no_diag = correlation_structure - diag(rep(1,each = dim(correlation_structure)[1]))  
+result <- which(abs(correlation_structure_no_diag) > 0.75, arr.ind = TRUE)
+result
+```
+Next, we draw the scatter plot of a pair of these highly correlated features to actually demonstrate how they really look like:
+```{r, warning = FALSE, message = FALSE}
+i <- 28
+ggplot(cor_plot, aes(x = cor_plot[[result[i,1]]], y = cor_plot[[result[i,2]]])) + 
+  geom_point(color="red") + 
+  geom_smooth() + labs(x = names(cor_plot)[result[i,1]], y = names(cor_plot)[result[i,2]]) +
+  theme_bw()
+```
+Next, we perform data cleaning, missing data imputation and creation of train and test data:
+```{r, eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+merged_data_trunc1 <- merged_data[,avl_variable]
+missing_loc <- is.na(merged_data_new$latitude)
+merged_data_new_trunc <-merged_data_trunc1[!missing_loc,]
+final_data_trunc <- cbind(merged_data_new_trunc, month = as.factor(month(ymd(merged_data_new_trunc$transactiondate))))
+final_data_trunc$transactiondate <- NULL
+final_data_trunc$hashottuborspa[which(final_data_trunc$hashottuborspa == "")] = "false"
+final_data_trunc$fireplaceflag[which(final_data_trunc$fireplaceflag == "")] = "false"
+final_data_trunc$taxdelinquencyflag[which(final_data_trunc$taxdelinquencyflag == "")] = "N"
+for(i in 1:length(avl_variable)){
+  if(is.character(final_data_trunc[,i])) final_data_trunc[,i] <- as.factor(final_data_trunc[,i])
+}
+final_data_trunc$propertyzoningdesc <- NULL
+final_data_trunc$propertycountylandusecode <- NULL
+set.seed(1)
+nsample <- sample(nrow(final_data_trunc))
+final_data_total <- final_data_trunc[nsample,]
+data_trial1 <- rfImpute(logerror ~., final_data_total[1:20000,])
+data_trial2 <- rfImpute(logerror ~., final_data_total[20001:30000,])
+data_trial3 <- rfImpute(logerror ~., final_data_total[30001:40000,])
+data_trial4 <- rfImpute(logerror ~., final_data_total[40001:50000,])
+data_trial5 <- rfImpute(logerror ~., final_data_total[50001:60000,])
+data_trial6 <- rfImpute(logerror ~., final_data_total[60001:nrow(final_data_total),])
+combined_data <- rbind(data_trial1, data_trial2, data_trial3, data_trial4, data_trial5, data_trial6)
+```
+Next we perform the random forest based model training and prediction:
+```{r, eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+rf_train_data <- train_data
+rf_train_data$longitude <- NULL
+rf_train_data$latitude <- NULL
+
+rf_test_data <- test_data
+rf_test_data$longitude <- NULL
+rf_test_data$latitude <- NULL
+
+
+rf_result <- ranger(logerror ~., rf_train_data)
+residual <- rf_train_data$logerror - rf_result$predictions
+pred_rf <- predict(rf_result, rf_test_data)
+```
+Next we train the spatial model and perform the prediction based on the estimated values of the spatial parameters:
+```{r, eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+library(spNNGP)
+sigma.sq <- 5
+tau.sq <- 1
+phi <- 3/0.5
+starting <- list("phi"=phi, "sigma.sq"=5, "tau.sq"=1)
+tuning <- list("phi"=0.5, "sigma.sq"=0.5, "tau.sq"=0.5)
+priors <- list("phi.Unif"=c(3/1, 3/0.01), "sigma.sq.IG"=c(2, 5), "tau.sq.IG"=c(2, 1))
+cov.model <- "exponential"
+sp_result <- spNNGP(residual ~  1 , coords = cbind(train_data$longitude, train_data$latitude)/1000, starting=starting, method="response", n.neighbors=10,
+                       tuning=tuning, priors=priors, cov.model=cov.model,
+                       n.samples=15000, n.omp.threads=7, verbose = FALSE)
+sp_predict <- spPredict(sp_result,matrix(1,nrow(test_data),1),cbind(test_data$longitude, test_data$latitude)/1000, start = 5001, verbose = FALSE, thin = 10)
+sp_predict_out <- rep(0, nrow(test_data))
+for(i in 1:nrow(test_data)){
+  sp_predict_out[i] <- median(sp_predict$p.y.0[i,])
+}
+mse <- mean((test_data$logerror - pred_rf$predictions - sp_predict_out)^2)
+```
